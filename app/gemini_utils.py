@@ -6,7 +6,15 @@ import google.generativeai as genai
 # Get logger and config from parent package
 try:
     from .config import _log, MAX_GEMINI_INPUT_LENGTH
-    from .schemas import BANK_STATEMENT_SCHEMA # Optional: for validation
+    from .schemas import (
+        BANK_STATEMENT_SCHEMA,
+        PURCHASE_INVOICE_SCHEMA,
+        SALES_INVOICE_SCHEMA,
+        RECEIPT_SCHEMA,
+        PURCHASE_ORDER_SCHEMA,
+        CHALLAN_SCHEMA,
+        SIMPLE_TEXT_SCHEMA
+    )
 except ImportError:
     # Fallback for standalone execution or testing
     logging.basicConfig(level=logging.INFO)
@@ -25,8 +33,7 @@ def clean_invalid_json(content: str) -> str:
 
 async def classify_and_extract_with_gemini(content: str, is_multi_page: bool) -> tuple[str, dict]:
     """
-    Uses Gemini to classify the document (bank statement vs. simple text)
-    and extract data accordingly.
+    Uses Gemini to classify the document and extract data accordingly.
 
     Args:
         content: The text content extracted from the document (potentially truncated).
@@ -34,8 +41,8 @@ async def classify_and_extract_with_gemini(content: str, is_multi_page: bool) ->
 
     Returns:
         A tuple containing:
-            - str: The classification ('bank_statement' or 'simple_text').
-            - dict: The extracted JSON data (either bank statement structure or simple text structure).
+            - str: The classification ('bank_statement', 'simple_text', 'purchase_invoice', 'sales_invoice', 'receipt', 'purchase_order', 'challan').
+            - dict: The extracted JSON data (based on the document type).
     """
     _log.info(f"Sending content (first {min(len(content), 50)} chars) to Gemini for classification/extraction.")
     try:
@@ -51,24 +58,31 @@ async def classify_and_extract_with_gemini(content: str, is_multi_page: bool) ->
 
         prompt = f"""
         Analyze the following content from {page_context}.
-        First, determine if this content primarily represents a bank statement or just general text.
+        First, determine the document type. It can be one of the following:
+        - bank_statement
+        - simple_text
+        - purchase_invoice
+        - sales_invoice
+        - receipt
+        - purchase_order
+        - challan
         Respond with a JSON object containing two keys:
-        1. "document_type": Set this to either "bank_statement" or "simple_text".
+        1. "document_type": Set this to the determined document type (one of the options above).
         2. "extracted_data":
            - If "document_type" is "bank_statement", extract the data into a JSON object matching this structure:
-             {{
-                 "account_holder": {{"name": "...", "address": "..." }},
-                 "bank_details": {{}},
-                 "account_summary": {{}},
-                 "transactions": [
-                     {{"date": "...", "details": "...", "credit": "...", "debit": "...", "balance": "..."}}
-                 ]
-             }}
-             Include only the transactions found in the provided content. For multi-page documents, this will only be the first page's transactions.
+             {json.dumps(BANK_STATEMENT_SCHEMA)}
            - If "document_type" is "simple_text", set "extracted_data" to a JSON object containing the raw text like this:
-             {{
-                 "extracted_text": "The full text content provided..."
-             }}
+             {json.dumps(SIMPLE_TEXT_SCHEMA)}
+           - If "document_type" is "purchase_invoice", extract the data into a JSON object matching this structure:
+             {json.dumps(PURCHASE_INVOICE_SCHEMA)}
+           - If "document_type" is "sales_invoice", extract the data into a JSON object matching this structure:
+             {json.dumps(SALES_INVOICE_SCHEMA)}
+           - If "document_type" is "receipt", extract the data into a JSON object matching this structure:
+             {json.dumps(RECEIPT_SCHEMA)}
+           - If "document_type" is "purchase_order", extract the data into a JSON object matching this structure:
+             {json.dumps(PURCHASE_ORDER_SCHEMA)}
+           - If "document_type" is "challan", extract the data into a JSON object matching this structure:
+             {json.dumps(CHALLAN_SCHEMA)}
 
         Content to analyze:
         \"\"\"{truncated_content}\"\"\"
@@ -97,17 +111,41 @@ async def classify_and_extract_with_gemini(content: str, is_multi_page: bool) ->
 
         # Basic validation and fallback logic
         if doc_type == "bank_statement":
-            # Check if essential keys are present and transactions is a list
             if not isinstance(extracted_data, dict) or not isinstance(extracted_data.get("transactions"), list):
                 _log.warning(f"Gemini classified as bank_statement but 'extracted_data' is invalid or 'transactions' is not a list. Falling back to simple_text.")
                 doc_type = "simple_text"
-                extracted_data = {"extracted_text": content} # Use original full content
+                extracted_data = {"extracted_text": content} # Return original full content
             # Optional: Add jsonschema validation here using BANK_STATEMENT_SCHEMA
         elif doc_type == "simple_text":
             if not isinstance(extracted_data, dict) or "extracted_text" not in extracted_data:
                 _log.warning(f"Gemini classified as simple_text but 'extracted_data' is invalid or 'extracted_text' key is missing. Using original content.")
                 # Ensure extracted_data is a dict with the correct key
-                extracted_data = {"extracted_text": content} # Use original full content
+                extracted_data = {"extracted_text": content} # Return original full content
+        elif doc_type == "purchase_invoice":
+            if not isinstance(extracted_data, dict) or not all(key in extracted_data for key in PURCHASE_INVOICE_SCHEMA["required"]):
+                _log.warning(f"Gemini classified as purchase_invoice but 'extracted_data' is missing required fields. Falling back to simple_text.")
+                doc_type = "simple_text"
+                extracted_data = {"extracted_text": content}
+        elif doc_type == "sales_invoice":
+            if not isinstance(extracted_data, dict) or not all(key in extracted_data for key in SALES_INVOICE_SCHEMA["required"]):
+                _log.warning(f"Gemini classified as sales_invoice but 'extracted_data' is missing required fields. Falling back to simple_text.")
+                doc_type = "simple_text"
+                extracted_data = {"extracted_text": content}
+        elif doc_type == "receipt":
+            if not isinstance(extracted_data, dict) or not all(key in extracted_data for key in RECEIPT_SCHEMA["required"]):
+                _log.warning(f"Gemini classified as receipt but 'extracted_data' is missing required fields. Falling back to simple_text.")
+                doc_type = "simple_text"
+                extracted_data = {"extracted_text": content}
+        elif doc_type == "purchase_order":
+            if not isinstance(extracted_data, dict) or not all(key in extracted_data for key in PURCHASE_ORDER_SCHEMA["required"]):
+                _log.warning(f"Gemini classified as purchase_order but 'extracted_data' is missing required fields. Falling back to simple_text.")
+                doc_type = "simple_text"
+                extracted_data = {"extracted_text": content}
+        elif doc_type == "challan":
+            if not isinstance(extracted_data, dict) or not all(key in extracted_data for key in CHALLAN_SCHEMA["required"]):
+                _log.warning(f"Gemini classified as challan but 'extracted_data' is missing required fields. Falling back to simple_text.")
+                doc_type = "simple_text"
+                extracted_data = {"extracted_text": content}
         else:
             _log.warning(f"Gemini returned unknown document_type: {doc_type}. Defaulting to simple_text.")
             doc_type = "simple_text"
@@ -146,14 +184,7 @@ async def extract_full_bank_statement_with_gemini(full_content: str) -> dict:
         prompt = f"""
         You are an expert assistant specialized in extracting structured data from bank statements.
         Convert the following full bank statement content into a JSON object matching this exact structure:
-        {{
-            "account_holder": {{"name": "...", "address": "..." }},
-            "bank_details": {{}},
-            "account_summary": {{}},
-            "transactions": [
-                {{"date": "...", "details": "...", "credit": "...", "debit": "...", "balance": "..."}}
-            ]
-        }}
+        {json.dumps(BANK_STATEMENT_SCHEMA)}
         Ensure all relevant fields are populated accurately based on the content. Pay close attention to extracting all transactions listed.
 
         Full Bank statement content:

@@ -20,8 +20,23 @@ try:
         classify_and_extract_with_gemini,
         extract_full_bank_statement_with_gemini
     )
-    # Import schemas if validation is done here
-    # from .schemas import BANK_STATEMENT_SCHEMA, SIMPLE_TEXT_SCHEMA
+    # Import schemas and models
+    from .schemas import (
+        BANK_STATEMENT_SCHEMA,
+        SIMPLE_TEXT_SCHEMA,
+        PURCHASE_INVOICE_SCHEMA,
+        SALES_INVOICE_SCHEMA,
+        RECEIPT_SCHEMA,
+        PURCHASE_ORDER_SCHEMA,
+        CHALLAN_SCHEMA,
+        BankStatementOutput,
+        PurchaseInvoiceOutput,
+        SalesInvoiceOutput,
+        ReceiptOutput,
+        PurchaseOrderOutput,
+        ChallanOutput,
+        SimpleTextOutput
+    )
 except ImportError:
     # Fallback for potential standalone testing (less likely needed here)
     logging.basicConfig(level=logging.INFO)
@@ -41,6 +56,7 @@ async def process_single_document(input_file_path: Path, base_input_folder: Path
     """
     Processes a single document: converts to PDF, extracts text, classifies,
     extracts data using Gemini, and saves the final JSON output.
+    Deletes the input file after successful processing.
 
     Args:
         input_file_path: Absolute path to the input file.
@@ -135,12 +151,26 @@ async def process_single_document(input_file_path: Path, base_input_folder: Path
                 "file_name": input_file_path.name,
                 "extracted_text": extracted_text # Use the full text
             }
-            # We can use the 'extracted_data' from classify_and_extract if we trust Gemini's simple text output format
-            # final_json_output = initial_extracted_data
-            # Add filename if missing from Gemini's simple text output
-            # if "file_name" not in final_json_output:
-            #     final_json_output["file_name"] = input_file_path.name
 
+        elif doc_type in ["purchase_invoice", "sales_invoice", "receipt", "purchase_order", "challan"]:
+            _log.info(f"Document '{input_file_path.name}' classified as {doc_type.upper()}.")
+            final_json_output = initial_extracted_data # Use the data extracted by classify_and_extract
+
+            # Handle multi-page documents (Invoices, Challans, Receipts)
+            if is_multi_page:
+                _log.warning(f"Multi-page {doc_type} processing is not fully implemented. Only first page data is used.")
+                # TODO: Implement logic to extract data from all pages and merge the results
+                # This might involve splitting the PDF, processing each page, and combining the extracted data
+                # Or, re-extracting the full text and sending it to Gemini with a more specific prompt
+                pass # Placeholder for future implementation
+
+        else:
+            _log.warning(f"Gemini returned unknown document_type: {doc_type}. Defaulting to simple_text.")
+            doc_type = "simple_text"
+            final_json_output = {
+                "file_name": input_file_path.name,
+                "extracted_text": extracted_text # Use the full text
+            }
 
         # 6. Save Final Output JSON
         if final_json_output: # Ensure we have something to save
@@ -149,7 +179,6 @@ async def process_single_document(input_file_path: Path, base_input_folder: Path
             _log.info(f"Successfully processed and saved output for '{input_file_path.name}' to {output_json_path}")
         else:
             _log.warning(f"No final JSON data generated for '{input_file_path.name}'. Skipping save.")
-
 
     except Exception as e:
         _log.error(f"Unhandled error processing document {input_file_path}: {e}", exc_info=True) # Log traceback
@@ -162,7 +191,13 @@ async def process_single_document(input_file_path: Path, base_input_folder: Path
             except OSError as e:
                 # Log warning but continue, temp dir will be cleaned eventually
                 _log.warning(f"Could not delete intermediate file {temp_pdf_path}: {e}")
-
+        
+        # 8. Delete the input file
+        try:
+            os.unlink(input_file_path)
+            _log.info(f"Successfully processed and deleted: {input_file_path.name}")
+        except OSError as e:
+            _log.error(f"Could not delete input file {input_file_path}: {e}")
 
 async def process_folder_recursive(input_folder_str: str, output_folder_str: str):
     """
@@ -222,5 +257,3 @@ async def process_folder_recursive(input_folder_str: str, output_folder_str: str
 
         processed_count = len(results) # Count how many tasks completed (even if they logged errors internally)
         _log.info(f"Finished processing folder. Attempted {len(tasks)} tasks, completed {processed_count}.")
-
-    _log.info(f"Temporary directory {temp_dir_str} cleaned up.")
