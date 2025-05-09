@@ -32,8 +32,8 @@ except ImportError as e:
         raise RuntimeError("process_single_document not implemented.")
 
 # Initialize FastAPI app with lifespan
-INPUT_FOLDER = os.path.abspath("D:\Models\ocr_extraction\Intelligent_Data_extraction_and_classification\input_folder")
-OUTPUT_FOLDER = os.path.abspath("D:\Models\ocr_extraction\Intelligent_Data_extraction_and_classification\output_folder")
+INPUT_FOLDER = os.path.abspath("input_folder")
+OUTPUT_FOLDER = os.path.abspath("output_folder")
 os.makedirs(INPUT_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 
